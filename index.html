@@ -1,0 +1,463 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="description" content="A live direct-message conversation made of the things people say when they are not saying everything.">
+<title>Unsaid · live chat</title>
+<style>
+/* ===== 1. COLOURS: two themes, swapped by the data-theme attribute on <html> ===== */
+:root{--bg:#17140f;--panel:#201c15;--line:#3a332a;--ink:#ece4d4;--mute:#a39a87;--acc:#d9a441;--accInk:#1b1304;--recv:#2b261d;--sent:#d9a441;--ok:#6fa86a;--warn:#d39a35;--err:#d2644c;--crit:#e0425e;--r:8px}
+:root[data-theme=light]{--bg:#e8e2d5;--panel:#f1ece1;--line:#c9c0ae;--ink:#231f18;--mute:#62594a;--acc:#8a5a00;--accInk:#fff8e8;--recv:#ddd5c4;--sent:#8a5a00;--ok:#2f6b2c;--warn:#8a5a00;--err:#a5361f;--crit:#9a1330}
+*{box-sizing:border-box;margin:0}
+html{color-scheme:dark}:root[data-theme=light]{color-scheme:light}
+body{background:var(--bg);color:var(--ink);font:16px/1.5 "Avenir Next","Segoe UI","Noto Sans",Roboto,"Helvetica Neue",sans-serif;min-height:100dvh;display:flex;flex-direction:column;align-items:center;padding:env(safe-area-inset-top) 12px env(safe-area-inset-bottom)}
+button{font:inherit;color:inherit;cursor:pointer}
+:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
+.mono{font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace}
+
+/* ===== 2. TOP TOOLBAR: the two requested buttons plus theme switch ===== */
+.bar{width:100%;max-width:640px;display:flex;gap:8px;flex-wrap:wrap;padding:12px 0}
+.btn{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:8px 12px;min-height:40px;display:inline-flex;align-items:center;gap:8px;transition:border-color .2s}
+.btn:hover{border-color:var(--acc)}
+.btn.main{background:var(--acc);border-color:var(--acc);color:var(--accInk);font-weight:600}
+.bar .sp{flex:1}
+.ic{width:14px;height:14px;border:2px solid currentColor;border-radius:3px;display:inline-block;position:relative}
+.ic.code::before{content:"</>";position:absolute;inset:-9px -3px;font:700 9px/30px monospace;text-align:center;border:0}
+.ic.code{border:0}
+
+/* ===== 3. THE CHAT (Instagram-style direct message) ===== */
+.chat{width:100%;max-width:640px;background:var(--panel);border:1px solid var(--line);border-radius:12px;overflow:hidden;display:flex;flex-direction:column}
+.head{display:flex;align-items:center;gap:12px;padding:12px 14px;border-bottom:1px solid var(--line)}
+.back{width:10px;height:10px;border-left:2px solid var(--ink);border-bottom:2px solid var(--ink);transform:rotate(45deg);margin:0 6px}
+.av{width:40px;height:40px;border-radius:50%;background:var(--acc);color:var(--accInk);display:grid;place-items:center;font-weight:700;position:relative}
+.av::after{content:"";position:absolute;right:0;bottom:0;width:11px;height:11px;border-radius:50%;background:var(--ok);border:2px solid var(--panel)}
+.who b{display:block;line-height:1.2}.who small{color:var(--mute)}
+.log{height:min(62dvh,640px);overflow-y:auto;padding:16px 14px;display:flex;flex-direction:column;gap:6px;scroll-behavior:smooth}
+.msg{max-width:82%;background:var(--recv);padding:9px 13px;border-radius:14px 14px 14px 4px;animation:pop .28s ease-out}
+.msg .tr{display:block;color:var(--mute);font-size:.84rem;margin-top:3px;animation:fade .6s}
+.msg time{display:block;font-size:.7rem;color:var(--mute);margin-top:2px}
+.note{align-self:center;color:var(--mute);font-size:.8rem;padding:6px 0}
+.caret{display:inline-block;width:2px;height:1em;background:var(--acc);vertical-align:-2px;margin-left:1px;animation:blink 1s steps(2) infinite}
+.dots{display:inline-flex;gap:4px;padding:6px 2px}.dots i{width:7px;height:7px;border-radius:50%;background:var(--mute);animation:bounce 1.1s infinite}
+.dots i:nth-child(2){animation-delay:.15s}.dots i:nth-child(3){animation-delay:.3s}
+.composer{display:flex;gap:10px;padding:12px 14px;border-top:1px solid var(--line);color:var(--mute)}
+.composer div{flex:1;border:1px solid var(--line);border-radius:var(--r);padding:8px 12px}
+.sk{height:38px;width:60%;background:linear-gradient(90deg,var(--recv),var(--line),var(--recv));background-size:200% 100%;border-radius:12px;animation:shimmer 1.2s linear infinite}
+/* His messages sit on the right, her messages on the left */
+.msg.me{align-self:flex-end;background:var(--sent);color:var(--accInk);border-radius:14px 14px 4px 14px}
+.msg.me time{color:inherit;opacity:.7;text-align:right}
+/* Push-notification banner that slides down from the top */
+.toast{position:fixed;top:calc(env(safe-area-inset-top) + 10px);left:50%;width:min(420px,calc(100vw - 24px));z-index:50;display:flex;gap:12px;align-items:center;background:var(--panel);border:1px solid var(--acc);border-radius:12px;padding:10px 12px;cursor:pointer;transform:translate(-50%,-140%);opacity:0;transition:transform .45s cubic-bezier(.2,.9,.3,1.2),opacity .3s;pointer-events:none}
+.toast.show{transform:translate(-50%,0);opacity:1;pointer-events:auto}
+.toast .av{width:34px;height:34px;flex:none;background:var(--recv);color:var(--ink)}.toast .av::after{display:none}
+.toast b{display:block;line-height:1.2;font-size:.9rem}.toast span{display:block;font-size:.92rem;overflow-wrap:anywhere}.toast small{margin-left:auto;color:var(--mute);flex:none}
+@keyframes pop{from{opacity:0;transform:translateY(8px) scale(.97)}}
+@keyframes fade{from{opacity:0}}
+@keyframes blink{50%{opacity:0}}
+@keyframes bounce{40%{transform:translateY(-5px)}}
+@keyframes shimmer{to{background-position:-200% 0}}
+
+/* ===== 4. FOOTER: the quiet signature with a breathing glow ===== */
+.foot{width:100%;max-width:640px;padding:28px 0 20px;display:flex;flex-direction:column;align-items:center;gap:10px}
+.sig{--mx:50%;--my:50%;position:relative;width:100%;text-align:center;padding:22px 16px;border-radius:12px;border:1px solid var(--line);background:radial-gradient(240px circle at var(--mx) var(--my),color-mix(in srgb,var(--acc) 22%,transparent),transparent 70%),var(--panel);animation:breathe 5s ease-in-out infinite;transition:border-color .8s}
+.sig:hover{border-color:var(--acc)}
+.sig strong{display:block;font:600 1.05rem/1.4 Georgia,"Times New Roman",serif;letter-spacing:.08em}
+.sig .ids{display:flex;gap:6px 18px;justify-content:center;flex-wrap:wrap;letter-spacing:.1em;font-size:.88rem;color:var(--mute);margin-top:4px}
+.sig .ids a{color:inherit}
+.sig p{font:italic .85rem Georgia,serif;opacity:.55;margin-top:10px;transition:opacity .8s}.sig:hover p{opacity:.8}
+@keyframes breathe{50%{box-shadow:0 0 22px color-mix(in srgb,var(--acc) 35%,transparent)}}
+.legal{display:flex;gap:16px}.legal button{background:none;border:0;color:var(--mute);text-decoration:underline;padding:6px}
+
+/* ===== 5. DIALOGS (source viewer, review, legal) ===== */
+dialog{background:var(--panel);color:var(--ink);border:1px solid var(--line);border-radius:12px;padding:0;width:min(960px,96vw);max-height:92dvh;margin:auto;opacity:0;transform:translateY(14px);transition:opacity .25s,transform .25s,overlay .25s allow-discrete,display .25s allow-discrete}
+dialog[open]{opacity:1;transform:none;display:flex;flex-direction:column}
+@starting-style{dialog[open]{opacity:0;transform:translateY(14px)}}
+dialog::backdrop{background:rgba(10,8,5,.62)}
+dialog.full{width:100vw;height:100dvh;max-height:100dvh;border-radius:0}
+.dh{display:flex;align-items:center;gap:8px;padding:12px 14px;border-bottom:1px solid var(--line)}
+.dh h2{font-size:1.05rem;flex:1}
+.tools{display:flex;gap:8px;flex-wrap:wrap;padding:10px 14px;border-bottom:1px solid var(--line);align-items:center}
+.tools input{flex:1;min-width:140px;background:var(--bg);color:var(--ink);border:1px solid var(--line);border-radius:var(--r);padding:8px 10px;font:inherit}
+.meta{padding:8px 14px;color:var(--mute);font-size:.82rem;border-bottom:1px solid var(--line);display:flex;gap:6px 16px;flex-wrap:wrap}
+.chip{border:1px solid var(--line);border-radius:4px;padding:0 6px}
+.code{overflow:auto;flex:1;min-height:200px;font:13px/1.55 ui-monospace,"SF Mono",Menlo,Consolas,monospace;background:var(--bg);padding:8px 0}
+.ln{display:flex;white-space:pre;min-width:max-content}.ln.hit{background:color-mix(in srgb,var(--acc) 22%,transparent)}.ln.cur{background:color-mix(in srgb,var(--acc) 45%,transparent)}
+.ln i{font-style:normal;color:var(--mute);width:56px;text-align:right;padding-right:14px;flex:none;user-select:none}
+.c{color:var(--mute);font-style:italic}.s{color:#7fae6a}.k{color:#d28a5a}.n{color:#c9a13c}.t{color:#6aa3c9}.a{color:#b98ac9}.p{color:#6aa3c9}
+:root[data-theme=light] .s{color:#2f6b2c}:root[data-theme=light] .k{color:#9a4a1a}:root[data-theme=light] .n{color:#7a5a00}:root[data-theme=light] .t,:root[data-theme=light] .p{color:#1d5a85}:root[data-theme=light] .a{color:#6d3a85}
+.rv{overflow:auto;padding:14px;display:flex;flex-direction:column;gap:10px}
+.sum{display:flex;gap:8px;flex-wrap:wrap}
+.sum button{border:1px solid var(--line);background:var(--bg);border-radius:var(--r);padding:6px 12px}.sum button[aria-pressed=true]{border-color:var(--acc)}
+.card{border:1px solid var(--line);border-radius:var(--r);padding:12px;background:var(--bg)}
+.card dl{display:grid;grid-template-columns:110px 1fr;gap:4px 10px;font-size:.88rem;margin-top:8px}.card dt{color:var(--mute)}.card dd{margin:0}
+.lv{font-weight:700;font-size:.78rem;padding:2px 8px;border-radius:4px;color:#fff;margin-right:8px}
+.Passed{background:var(--ok)}.Warning{background:var(--warn)}.Error{background:var(--err)}.Critical{background:var(--crit)}
+:root:not([data-theme=light]) .Passed,:root:not([data-theme=light]) .Warning{color:#14110b}
+.note2{border:1px solid var(--acc);border-radius:var(--r);padding:12px;font-size:.9rem}
+.legaltxt{padding:14px;overflow:auto;font-size:.92rem}.legaltxt p{margin-bottom:10px}
+@media (max-width:520px){.card dl{grid-template-columns:1fr}.ln i{width:44px}}
+@media (prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}}
+</style>
+</head>
+<body>
+
+<!-- Toolbar: View Source Code, Code Review, Theme -->
+<div class="bar" role="toolbar" aria-label="Page tools">
+  <button class="btn main" id="openSrc" aria-haspopup="dialog">View Source Code</button>
+  <button class="btn" id="openRev" aria-haspopup="dialog">Code Review</button>
+  <span class="sp"></span>
+  <button class="btn" id="alerts" aria-pressed="true">Alerts: On</button>
+  <button class="btn" id="theme" aria-label="Switch colour theme">Theme</button>
+</div>
+
+<!-- The chat: header on top, live messages in the middle, composer at the bottom -->
+<main class="chat" aria-label="Live conversation">
+  <header class="head">
+    <span class="back" aria-hidden="true"></span>
+    <span class="av" aria-hidden="true">A</span>
+    <div class="who"><b>Aanya</b><small id="status" aria-live="polite">Active now</small></div>
+  </header>
+  <div class="log" id="log" role="log" aria-live="polite"><div class="sk" id="skel"></div></div>
+  <div class="composer"><div>Message…</div></div>
+</main>
+
+<!-- Footer credit -->
+<footer class="foot">
+  <div class="sig" id="sig">
+    <strong>Made by Avneet Kumar</strong>
+    <div class="ids" id="ids"></div>
+    <p id="thought"></p>
+    <small class="mono" style="color:var(--mute)">© <span id="year">2026</span></small>
+  </div>
+  <div class="legal">
+    <button id="openPriv">Privacy Policy</button><button id="openTos">Terms of Service</button>
+  </div>
+</footer>
+
+<!-- Notification banner for his messages -->
+<div class="toast" id="toast" role="status" aria-live="polite">
+  <span class="av" aria-hidden="true">R</span>
+  <div><b>Rohan</b><span id="toastMsg"></span></div><small>now</small>
+</div>
+
+<!-- Source viewer -->
+<dialog id="srcDlg" aria-labelledby="srcT">
+  <div class="dh"><h2 id="srcT">Source Code Viewer</h2>
+    <button class="btn" id="srcFull" aria-pressed="false">Expand</button>
+    <button class="btn" data-close aria-label="Close">Close</button></div>
+  <div class="tools">
+    <input id="q" type="search" aria-label="Search code" placeholder="Search code">
+    <span id="qc" class="mono" style="color:var(--mute)"></span>
+    <button class="btn" id="qp" aria-label="Previous match">Prev</button><button class="btn" id="qn" aria-label="Next match">Next</button>
+    <button class="btn" id="copy">Copy code</button><button class="btn main" id="dl">Download .html</button>
+  </div>
+  <div class="meta" id="stats"></div>
+  <div class="code" id="code" tabindex="0" aria-label="Source code"></div>
+</dialog>
+
+<!-- Review panel -->
+<dialog id="revDlg" aria-labelledby="revT">
+  <div class="dh"><h2 id="revT">Code Review</h2><button class="btn" data-close aria-label="Close">Close</button></div>
+  <div class="meta" id="revMeta"></div>
+  <div class="rv" id="rv"></div>
+</dialog>
+
+<!-- Legal dialog -->
+<dialog id="legDlg" aria-labelledby="legT">
+  <div class="dh"><h2 id="legT"></h2><button class="btn" data-close aria-label="Close">Close</button></div>
+  <div class="legaltxt" id="legBody"></div>
+</dialog>
+
+<script>
+/* ===== A. Catch errors from the very start so the review can report them ===== */
+const ERRS=[];
+addEventListener('error',e=>ERRS.push(e.message));
+addEventListener('unhandledrejection',e=>ERRS.push(String(e.reason)));
+const _ce=console.error;console.error=(...a)=>{ERRS.push(a.join(' '));_ce.apply(console,a)};
+
+const $=id=>document.getElementById(id);
+const esc=s=>s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+const REDUCED=matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+/* ===== B. Settings you can edit. Leave a link empty and the name stays plain text ===== */
+const CONFIG={links:{'avneetkumar.corporate':'','avneetkumarindia':''}};
+
+/* ===== C. The words. Each pair is [what was said, what it really means] ===== */
+const LINES=[
+["Main busy thi.","I was busy."],["Maine dekha hi nahi.","I didn't see your message."],["Kuch nahi hua.","Nothing happened."],
+["Woh sirf friend hai.","He's just a friend."],["Mujhe yaad nahi tha.","I forgot."],["Main so gayi thi.","I fell asleep."],
+["Maine kuch hide nahi kiya.","I didn't hide anything from you."],["Tum overthink kar rahe ho.","You're overthinking."],
+["Tum mujh par trust nahi karte.","You don't trust me."],["Maine usse baat nahi ki.","I didn't talk to him."],
+["Bas normal baat thi.","It was just a normal conversation."],["Mere feelings change nahi hue.","My feelings haven't changed."],
+["Mujhe thoda space chahiye.","I need some space."],["Main tumhe hurt nahi karna chahti thi.","I didn't want to hurt you."],
+["Tum mere liye important ho.","You're important to me."],["Main kisi aur ke baare mein nahi soch rahi.","I'm not thinking about anyone else."],
+["Maine woh isliye nahi bataya kyunki tum gussa ho jaate.","I didn't tell you because I knew you'd get angry."],
+["Tum bina wajah doubt karte ho.","You doubt me for no reason."],
+["Main tumse pyaar karti hoon, bas situation kharab hai.","I love you, it's just that the situation is complicated."],
+["Mujhe tumse koi problem nahi.","I have no problem with you."],["Main change ho jaungi.","I will change."],
+["Mujhe khud nahi pata main kya chahti hoon.","I don't know what I want myself."],
+["Main tumse jhooth nahi bol rahi, bas poori sachchai nahi bata rahi.","I'm not lying to you; I'm just not telling you the whole truth."]
+];
+
+/* ===== D. Live typing loop: dots, then letters appear one by one, then the meaning fades in ===== */
+const log=$('log'),status=$('status');
+const clock=()=>new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
+function toBottom(){log.scrollTop=log.scrollHeight}
+function addNote(t){const d=document.createElement('div');d.className='note';d.textContent=t;log.append(d);toBottom()}
+async function say(text,meaning,fast){
+  status.textContent='typing…';
+  const bub=document.createElement('div');bub.className='msg';
+  bub.innerHTML='<span class="dots" aria-hidden="true"><i></i><i></i><i></i></span>';
+  log.append(bub);toBottom();await sleep(REDUCED?200:fast?450:900);
+  const span=document.createElement('span');const caret=document.createElement('span');caret.className='caret';
+  bub.textContent='';bub.append(span,caret);
+  for(const ch of text){span.textContent+=ch;toBottom();await sleep(REDUCED?4:fast?12+Math.random()*10:34+Math.random()*40)}
+  caret.remove();
+  const tr=document.createElement('span');tr.className='tr';tr.textContent=meaning;
+  const tm=document.createElement('time');tm.textContent=clock();
+  if(meaning)bub.append(tr);bub.append(tm);toBottom();status.textContent='Active now';
+  while(log.querySelectorAll('.msg').length>30)log.querySelector('.msg').remove();
+  await sleep(fast?600:1400);
+}
+async function runChat(){
+  await sleep(700);$('skel')?.remove();addNote('Today');
+  for(;;){
+    for(const [t,m] of LINES)await say(t,m);   // part 1: the original lines, untouched
+    await playStory();                          // part 2: the 500-message story
+    addNote('The conversation begins again');await sleep(1500);
+  }
+}
+
+/* ===== D3. The story: 5 chapters x 5 scenes x 10 beats x 2 speakers = 500 messages.
+   {v} is replaced by each scene's topic, so every message is different. ===== */
+const CH=[
+{n:'Cracks',
+ v:["your 2 am online status","the chat you closed when I walked in","your new phone password","the contact saved as Priya Library","your story views from one account"],
+ h:["Can we talk about {v}?","I noticed {v} and I can't stop thinking about it.","Be honest with me about {v}.","I'm not accusing you, I'm asking about {v}.","Every time I bring up {v} you change the subject.","Tell me one true thing about {v}.","I'd rather hear about {v} from you than find out myself.","Why does {v} make you this nervous?","Just explain {v} and I'll let it go.","I'm still waiting on {v}."],
+ w:["Phir se {v}? Tum itna kyun soch rahe ho?","Honestly {v} is nothing, you're making it big.","Main tumse kuch nahi chhupa rahi, {v} bas coincidence hai.","Tum accuse hi kar rahe ho, {v} sirf bahana hai.","Mujhe thak gayi hoon {v} par safai dete dete.","Chhodo na, {v} koi issue hi nahi hai.","You always blow up things like {v}.","Nervous nahi hoon, bas {v} par tumhare sawaal se irritated hoon.","Theek hai, {v} ke baare mein agli baar bataungi. Abhi mood nahi.","Itni si baat, {v}, pe mera din kharab mat karo."]},
+{n:'Exposed',
+ v:["the chat screenshot with Kabir","the call log from 1:12 am","the gift receipt in your bag","the location you shared with him","the voice note you forgot to delete"],
+ h:["I have {v}. I don't need you to guess what I know.","{v} says more than your words ever did.","I didn't go looking. {v} found me.","Look at {v} and tell me I'm imagining it.","You said nothing happened, and then there is {v}.","I kept {v} for three days before I said a word.","Do you know how it feels to see {v}?","I'm sending you {v} so you can't say I made it up.","Don't tell me {v} means nothing.","{v} is the reason I stopped sleeping."],
+ w:["Tumne mere phone mein {v} dhoondha? Privacy ka matlab hi nahi samajhte.","Tum {v} ko context se bahar dekh rahe ho.","Wo sab purana tha, {v} abhi ka nahi hai.","Maine kabhi nahi kaha ki {v} serious tha.","Main tumhe batane hi wali thi, bas {v} ka sahi time nahi mila.","{v} ka matlab wo nahi jo tum soch rahe ho.","Pehle ye batao, {v} tumhare paas aaya kaise?","Ek galti ho gayi, {v} ko life mat bana lo.","Dil se bol rahi hoon, {v} mein feelings nahi thi.","Ab {v} ke baad tum mujh par trust hi nahi karoge, hai na?"]},
+{n:'The spin',
+ v:["that night","those messages","that phone call","the timeline","your reaction"],
+ h:["I remember {v} clearly. Please stop rewriting it.","You can't change {v} by saying it louder.","I'm not confused about {v}. You want me to be.","Stop telling me I imagined {v}.","I trust my eyes over your story about {v}.","Every new version of {v} contradicts the last.","If {v} was innocent, why three different explanations?","You keep editing {v} each time I reply.","I'm calm about {v}. That's what scares you.","I'm done arguing with a changing version of {v}."],
+ w:["Tumhe {v} galat yaad hai. Tum hamesha aisa karte ho.","Pagal ho gaye ho kya? {v} aisa kuch tha hi nahi.","Therapist ke paas jao, {v} ko lekar tumhara dimaag bana raha hai.","Meri friends bhi kehti hain tum {v} pe over react karte ho.","Maine kabhi aisa nahi kaha, {v} tumhari imagination hai.","Tumhare shak ki wajah se {v} bhi ajeeb lagne laga hai.","Agar {v} sach hota toh main yahan tumse baat kyun karti?","Tum {v} ko apne fayde ke liye bada bana rahe ho.","Maine sirf tumhe bachane ke liye {v} chhupaya tha.","Sabko {v} ke baare mein bolna chahte ho? Phir main bhi bolungi tum kaise ho."]},
+{n:'The pull',
+ v:["our two years together","my bad week","your birthday plans","the promise you made me","what my family will think"],
+ h:["Don't use {v} to make me feel guilty.","I can see what you're doing with {v}.","{v} is not an answer to what I asked.","I care about {v}, but that doesn't erase what happened.","Crying doesn't change {v}.","Please don't put {v} between me and the truth.","You're using {v} to steer me away.","I still love you, and I still can't ignore {v}.","Love shouldn't need {v} as a bargaining chip.","I'm thinking about {v}, and I'm thinking clearly."],
+ w:["Itne time ke baad {v} bhi kuch matlab nahi rakhta?","Main toot rahi hoon, aur tum {v} bhool gaye.","Please, ek aur chance. {v} ke naam par.","Tum chale gaye toh {v} ka kya hoga? Socho.","Tum chale gaye toh main sabko bata dungi, {v} ke baare mein bhi. Tumhara naam kharab hoga.","Tum itne cold ho gaye ho, {v} pe bhi nahi pighle.","Meri galti thi, haan, par {v} ko dekho aur khud ko bhi.","Ro rahi hoon dekho, {v} ki kasam kuch nahi hua.","Main badal jaungi, {v} ke liye, bas ek baar.","Tum meri duniya ho, aur {v} mujhe sab yaad hai."]},
+{n:'The last word',
+ v:["this conversation","the screenshots","my decision","your promises","tomorrow morning"],
+ h:["I've thought about {v} for a long time.","I'm not angry about {v}. I'm tired of being confused.","I won't use {v} against you. That's not who I am.","You deserve honesty about {v}, and so do I.","What I feel about {v} won't change tonight.","I thought about {v} again before writing this.","Please stop messaging me about {v} tonight.","I'll take care of myself after {v}.","I wish you well, even after {v}.","Goodbye isn't revenge. It's just what {v} left me with."],
+ w:["Sach bolun? {v} ke baare mein main darr gayi thi.","Tum mujhe {v} ke baad chhod doge, hai na?","Ab {v} par kuch nahi bolungi. Bas itna: tum bure nahi ho.","Theek hai, {v} ko khatam samjho.","Ek last baar, {v} ke naam par, call utha lo.","Mujhe pata hai {v} meri wajah se bigda.","Main {v} par jhooth bol rahi thi, sorry.","Tum sahi the, {v} ke baare mein sab sach tha.","Aaj raat {v} par mat sochna, please.","Main khud nahi jaanti {v} ke baad hum kya hain."]}
+];
+const cap=s=>s[0].toUpperCase()+s.slice(1);
+const STORY=[];
+CH.forEach((c,i)=>c.v.forEach(v=>c.h.forEach((_,b)=>{
+  STORY.push({ch:i,who:'him',t:cap(c.h[b].split('{v}').join(v))});
+  STORY.push({ch:i,who:'her',t:cap(c.w[b].split('{v}').join(v))});
+})));
+let storyOn=false; // while true, the random notification pool pauses so the story stays in order
+async function playStory(){
+  storyOn=true;let ch=-1;
+  for(const m of STORY){
+    if(m.ch!==ch){ch=m.ch;addNote('Chapter '+(ch+1)+': '+CH[ch].n);await sleep(1200)}
+    if(m.who==='her')await say(m.t,'',true);
+    else{await sleep(REDUCED?300:700);hisBubble(m.t);notify(m.t);await sleep(REDUCED?500:900)}
+  }
+  storyOn=false;
+}
+
+/* ===== D2. His messages: a shuffled pool so no message repeats until all have been used ===== */
+const HIM=["Why so busy?","Reply toh kar do.","Online dikh rahi ho, par reply nahi?","Kya chal raha hai aajkal?","Seen karke chhod diya?",
+"Aaj call bhi nahi uthaya.","Main wait kar raha hoon.","Kuch toh bolo.","Itna time kahan lagta hai?","Sab theek hai na?",
+"Mujhse baat karna band kar diya?","Dinner kiya?","Kal se baat nahi hui.","Bas ek line likh do.","Main ignore feel kar raha hoon.",
+"Kisi ke saath ho kya?","Sach batao, kya hua?","Aaj bhi busy?","Mujhe farak padta hai, jaanti ho na.","Thoda time mere liye bhi.",
+"Typing dikha, phir ruk gayi. Maine dekha.","Main gussa nahi hoon, bas jaanna hai.","Good night bhi nahi bola.","Phone silent pe hai kya?",
+"Tumhari chuppi zyada loud hai.","Missed call dekha?","Theek hai, jab free ho batana.","Main yahin hoon.","Kitna wait karun?",
+"Ek voice note hi bhej do.","Last seen 2 minute pehle tha.","Mujhe sach sunna hai, chahe jaisa bhi ho."];
+let bag=[],lastHim='',alertsOn=true,toastTimer;
+function nextHim(){
+  if(!bag.length){bag=HIM.map(t=>[Math.random(),t]).sort((a,b)=>a[0]-b[0]).map(x=>x[1]);
+    if(bag[bag.length-1]===lastHim)[bag[0],bag[bag.length-1]]=[bag[bag.length-1],bag[0]]}
+  lastHim=bag.pop();return lastHim;
+}
+function hide(){$('toast').classList.remove('show')}
+function notify(text){
+  if(!alertsOn)return;
+  $('toastMsg').textContent=text;$('toast').classList.add('show');
+  clearTimeout(toastTimer);toastTimer=setTimeout(hide,4200);
+}
+function hisBubble(text){
+  const b=document.createElement('div');b.className='msg me';b.textContent=text;
+  const tm=document.createElement('time');tm.textContent=clock();b.append(tm);
+  log.append(b);toBottom();
+  while(log.querySelectorAll('.msg').length>30)log.querySelector('.msg').remove();
+}
+async function startHim(){
+  await sleep(REDUCED?2500:5000);
+  for(;;){if(!storyOn){const t=nextHim();hisBubble(t);notify(t)}await sleep(REDUCED?6000:5500+Math.random()*6500)}
+}
+$('toast').onclick=hide;
+$('alerts').onclick=e=>{alertsOn=!alertsOn;if(!alertsOn)hide();e.currentTarget.setAttribute('aria-pressed',alertsOn);e.currentTarget.textContent='Alerts: '+(alertsOn?'On':'Off')};
+
+/* ===== E. Footer: year, handles, hidden thought, glow that follows the pointer ===== */
+$('year').textContent=new Date().getFullYear();
+for(const [name,href] of Object.entries(CONFIG.links)){
+  const el=href?Object.assign(document.createElement('a'),{href,rel:'noopener noreferrer'}):document.createElement('span');
+  el.textContent=name;$('ids').append(el);
+}
+const THOUGHTS=["Some things are built to function. This was built to feel.","Crafted in silence, but it speaks when it matters.","Most will scroll past. A few will feel it."];
+$('thought').textContent=THOUGHTS[Math.floor(Math.random()*THOUGHTS.length)];
+$('sig').addEventListener('pointermove',e=>{const r=e.currentTarget.getBoundingClientRect();e.currentTarget.style.setProperty('--mx',(e.clientX-r.left)+'px');e.currentTarget.style.setProperty('--my',(e.clientY-r.top)+'px')});
+
+/* ===== F. Theme ===== */
+const root=document.documentElement;
+root.dataset.theme=matchMedia('(prefers-color-scheme: light)').matches?'light':'dark';
+$('theme').onclick=()=>{root.dataset.theme=root.dataset.theme==='light'?'dark':'light'};
+
+/* ===== G. Dialog helpers ===== */
+document.querySelectorAll('dialog').forEach(d=>{
+  d.addEventListener('click',e=>{if(e.target===d||e.target.hasAttribute('data-close'))d.close()});
+});
+
+/* ===== H. THE ONE SOURCE OF TRUTH: both panels read from this same snapshot ===== */
+const SRC={text:'',lines:[],modes:[],origin:'',stamp:'',hash:''};
+function fnv(s){let h=2166136261;for(let i=0;i<s.length;i++){h^=s.charCodeAt(i);h=Math.imul(h,16777619)}return (h>>>0).toString(16)}
+async function loadSource(){
+  let text='',origin='';
+  try{const r=await fetch(location.href,{cache:'no-store'});const t=await r.text();
+    if(r.ok&&/^\s*<!doctype html>/i.test(t)){text=t;origin='Exact file as served'}}catch(e){}
+  if(!text){ // some browsers block reading local files, so rebuild from the live page
+    const c=document.documentElement.cloneNode(true);
+    ['log','code','rv','revMeta','stats','legBody','ids'].forEach(i=>{const n=c.querySelector('#'+i);if(n)n.innerHTML=''});
+    c.querySelectorAll('dialog').forEach(d=>d.removeAttribute('open'));
+    text='<!DOCTYPE html>\n'+c.outerHTML;origin='Snapshot rebuilt from the live page (approximate)'}
+  SRC.text=text;SRC.lines=text.split('\n');SRC.origin=origin;SRC.stamp=new Date().toLocaleString();SRC.hash=fnv(text);
+  let mode='html';SRC.modes=SRC.lines.map(l=>{const m=mode;
+    if(mode==='html'){if(/<style/i.test(l))mode='css';else if(/<script/i.test(l))mode='js'}
+    else if(/<\/(style|script)>/i.test(l))mode='html';return m});
+}
+
+/* ===== I. Syntax colouring ===== */
+function tok(s,re,cls){let o='',i=0;for(const m of s.matchAll(re)){o+=esc(s.slice(i,m.index));
+  const g=m.slice(1).findIndex(x=>x!==undefined);o+='<span class="'+cls[g]+'">'+esc(m[0])+'</span>';i=m.index+m[0].length}return o+esc(s.slice(i))}
+const RE={
+ js:[/(\/\/.*$)|("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|`(?:[^`\\]|\\.)*`)|\b(const|let|var|function|return|if|else|for|while|new|async|await|try|catch|class|of|in|typeof|null|true|false)\b|(\b\d+(?:\.\d+)?\b)/g,['c','s','k','n']],
+ css:[/(\/\*.*?\*\/)|("[^"]*"|'[^']*')|([\w-]+)(?=\s*:)|(#[0-9a-fA-F]{3,8}\b|\b\d+(?:\.\d+)?(?:px|rem|em|%|s|ms|vh|vw|deg)?\b)/g,['c','s','p','n']],
+ html:[/(<!--.*?-->)|(<\/?[a-zA-Z][\w-]*|\/?>)|("[^"]*")|([\w-]+)(?==)/g,['c','t','s','a']]};
+function paint(){
+  const st={b:false};
+  return SRC.lines.map((l,i)=>{const mode=SRC.modes[i],t=l.trim(),close=mode==='html'?'-->':'*/';let h;
+    if(st.b){if(l.includes(close))st.b=false;h='<span class="c">'+esc(l)+'</span>'}
+    else if((mode==='html'?t.startsWith('<!--'):t.startsWith('/*'))&&!l.includes(close)){st.b=true;h='<span class="c">'+esc(l)+'</span>'}
+    else h=tok(l,RE[mode][0],RE[mode][1]);
+    return '<div class="ln"><i>'+(i+1)+'</i><span>'+(h||' ')+'</span></div>'}).join('');
+}
+
+/* ===== J. Source viewer ===== */
+let hits=[],cur=-1;
+async function openSrc(){
+  const box=$('code');box.innerHTML='<div class="sk" style="margin:10px"></div>'.repeat(5);$('srcDlg').showModal();
+  await loadSource();box.innerHTML=paint();
+  const n=SRC.lines.length,bytes=new TextEncoder().encode(SRC.text).length,cnt={html:0,css:0,js:0};
+  SRC.modes.forEach(m=>cnt[m]++);
+  $('stats').innerHTML='<span>Lines: <b>'+n+'</b></span><span>Characters: <b>'+SRC.text.length+'</b></span><span>Size: <b>'+(bytes/1024).toFixed(1)+' KB</b></span>'+
+   '<span class="chip">HTML '+cnt.html+'</span><span class="chip">CSS '+cnt.css+'</span><span class="chip">JavaScript '+cnt.js+'</span>'+
+   '<span>Version: <b>current</b>, loaded '+esc(SRC.stamp)+', fingerprint <span class="mono">'+SRC.hash+'</span></span><span>'+esc(SRC.origin)+'</span>';
+  $('q').value='';search();
+}
+function search(){
+  const v=$('q').value.toLowerCase(),rows=$('code').children;hits=[];cur=-1;
+  [...rows].forEach((r,i)=>{r.classList.remove('hit','cur');if(v&&SRC.lines[i]?.toLowerCase().includes(v)){r.classList.add('hit');hits.push(i)}});
+  $('qc').textContent=v?(hits.length?hits.length+' matches':'No matches'):'';
+}
+function jump(d){if(!hits.length)return;if(cur>=0)$('code').children[hits[cur]].classList.remove('cur');
+  cur=(cur+d+hits.length)%hits.length;const r=$('code').children[hits[cur]];r.classList.add('cur');r.scrollIntoView({block:'center'});$('qc').textContent=(cur+1)+' of '+hits.length}
+$('q').oninput=search;$('qn').onclick=()=>jump(1);$('qp').onclick=()=>jump(-1);
+$('q').onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();jump(e.shiftKey?-1:1)}};
+$('srcFull').onclick=e=>{const f=$('srcDlg').classList.toggle('full');e.currentTarget.setAttribute('aria-pressed',f);e.currentTarget.textContent=f?'Collapse':'Expand'};
+$('copy').onclick=async e=>{const b=e.currentTarget;
+  try{await navigator.clipboard.writeText(SRC.text)}catch(x){const t=document.createElement('textarea');t.value=SRC.text;document.body.append(t);t.select();document.execCommand('copy');t.remove()}
+  b.textContent='Copied';setTimeout(()=>b.textContent='Copy code',1600)};
+$('dl').onclick=()=>{const u=URL.createObjectURL(new Blob([SRC.text],{type:'text/html'}));
+  const a=Object.assign(document.createElement('a'),{href:u,download:'unsaid-chat.html'});document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(u),500)};
+$('openSrc').onclick=openSrc;
+
+/* ===== K. Code review: real checks run on the same SRC snapshot ===== */
+const sec=n=>({html:'HTML',css:'CSS',js:'JavaScript'}[SRC.modes[n-1]]||'Document');
+const find=re=>{const i=SRC.lines.findIndex((l,k)=>re.test(l)&&k>-1);return i<0?0:i+1};
+function review(){
+  const F=[],S=SRC.text,doc=document;
+  const add=(lv,p,line,why,fix,imp)=>F.push({lv,p,line,sec:line?sec(line):'Document',why,fix,imp});
+  const ok=(p)=>add('Passed',p,0,'Check completed with no finding.','None needed.','None.');
+  const ids=[...doc.querySelectorAll('[id]')].map(e=>e.id),dup=ids.filter((x,i)=>ids.indexOf(x)!==i);
+  /^\s*<!doctype html>/i.test(S)?ok('Document type is declared'):add('Error','Missing doctype',1,'Browsers fall back to quirks mode.','Start the file with the HTML5 doctype.','Layout differs between browsers.');
+  doc.documentElement.lang?ok('Page language is set'):add('Error','Missing lang attribute',2,'Screen readers guess the wrong voice.','Add lang to the html tag.','Accessibility failure.');
+  dup.length?add('Error','Duplicate IDs: '+[...new Set(dup)].join(', '),find(new RegExp('id="'+dup[0]+'"')),'Scripts and labels target the wrong element.','Make every id unique.','Broken behaviour.'):ok('No duplicate IDs');
+  const bad=[...doc.querySelectorAll('[aria-controls],[aria-labelledby],label[for]')].filter(e=>{const v=e.getAttribute('aria-controls')||e.getAttribute('aria-labelledby')||e.htmlFor;return v&&!doc.getElementById(v)});
+  bad.length?add('Error','Reference to a missing id',0,'Assistive tech loses the link.','Point it at an existing id.','Accessibility failure.'):ok('All ARIA and label references resolve');
+  const nb=[...doc.querySelectorAll('button')].filter(b=>!(b.textContent.trim()||b.getAttribute('aria-label')));
+  nb.length?add('Error',nb.length+' button(s) without a name',0,'Unlabelled buttons cannot be used by voice or screen reader.','Add text or aria-label.','Accessibility failure.'):ok('Every button has an accessible name');
+  const ni=[...doc.querySelectorAll('input,select,textarea')].filter(i=>!(i.getAttribute('aria-label')||i.labels?.length));
+  ni.length?add('Error','Form field without label',find(/<input/),'Users cannot tell what to type.','Add a label or aria-label.','Form validation and accessibility fail.'):ok('Form fields are labelled (no submit forms exist, so validation is not applicable)');
+  const ext=new RegExp('https?:'+'//'),el=find(ext);
+  el?add('Warning','External URL found in source',el,'External hosts add dependencies and privacy exposure.','Remove it or confirm it is intended.','Can fail offline or leak visits.'):ok('No external dependencies or links');
+  doc.querySelectorAll('img,iframe,script[src],link[href]').length?add('Warning','Assets loaded from files',0,'Missing files break the page.','Verify each path.','Broken visuals.'):ok('No separate assets to go missing');
+  const sk=find(/(api[_-]?key|secret|token|passw(or)?d)\s*[:=]\s*['"][^'"]{8,}/i);
+  sk?add('Critical','Possible secret in source',sk,'Anyone can read client code.','Remove it and rotate the key.','Account compromise.'):ok('No exposed keys or secrets found');
+  const ev=find(/\beval\s*\(|new Function\s*\(|document\.write\s*\(/);
+  ev?add('Error','Dynamic code execution',ev,'Opens the door to script injection.','Replace with safe logic.','Security exposure.'):ok('No eval, Function constructor or document.write');
+  const ih=find(/\.innerHTML\s*=/);
+  ih?add('Warning','innerHTML is used',ih,'Safe only while every inserted value is escaped. This page escapes source text before rendering.','Prefer textContent, or keep esc() on every dynamic value.','XSS risk if later edits skip escaping.'):ok('No innerHTML writes');
+  const ia=find(/\son[a-z]+\s*=\s*["']/);
+  ia&&SRC.modes[ia-1]==='html'?add('Warning','Inline event handler',ia,'Blocks a strict Content Security Policy.','Use addEventListener.','Harder security hardening.'):ok('No inline event handlers');
+  const cl=find(/console\.log\(/);cl?add('Warning','console.log left in code',cl,'Noise and possible data leaks.','Remove before release.','Minor.'):ok('No leftover console.log');
+  const td=find(/TODO|FIXME/);td?add('Warning','Unfinished marker',td,'Work was left half done.','Resolve it.','Unknown.'):ok('No TODO or FIXME markers');
+  ERRS.length?add('Error',ERRS.length+' runtime error(s): '+ERRS[0],0,'Errors broke something for the user.','Fix the first error.','Features may fail.'):ok('No console or runtime errors since page load');
+  /try\s*\{/.test(S)?ok('Error handling exists (try/catch around source loading and clipboard)'):add('Warning','No error handling',0,'Failures go unnoticed.','Wrap risky calls.','Silent breakage.');
+  (/<meta name="viewport"/.test(S)&&/@media/.test(S))?ok('Viewport meta and responsive rules present'):add('Error','Not responsive',find(/<head/),'Phones render the desktop layout.','Add viewport meta and media queries.','Unusable on mobile.');
+  const wl=find(/width:\s*\d{4,}px/);wl?add('Warning','Very wide fixed width',wl,'Overflows small screens.','Use max-width.','Mobile overflow.'):ok('No oversized fixed widths');
+  /:focus-visible/.test(S)?ok('Visible keyboard focus styles'):add('Error','No focus style',0,'Keyboard users lose their place.','Add :focus-visible.','Accessibility failure.');
+  doc.querySelector('[tabindex]:not([tabindex="0"]):not([tabindex="-1"])')?add('Warning','Positive tabindex',0,'Breaks natural tab order.','Use 0 or -1.','Confusing keyboard order.'):ok('Tab order follows the page. Dialogs are native and trap focus');
+  /prefers-reduced-motion/.test(S)?ok('Reduced-motion preference respected'):add('Warning','Motion ignores user preference',0,'Can cause discomfort.','Add a reduced-motion query.','Accessibility.');
+  add('Warning','Colour contrast needs a manual check',0,'Automated scans here cannot measure contrast on every state.','Test both themes with a contrast tool.','Low-vision users may struggle.');
+  doc.title&&doc.querySelector('meta[name=description]')&&doc.querySelectorAll('h1').length<2?ok('SEO basics: title and description present'):add('Warning','SEO basics incomplete',find(/<title/),'Search previews are poor.','Add a title, description and a single h1.','Lower discoverability.');
+  const kb=new TextEncoder().encode(S).length/1024;kb>150?add('Warning','Large single file ('+kb.toFixed(0)+' KB)',0,'Slow first load.','Minify or split.','Slower on poor networks.'):ok('File size is small ('+kb.toFixed(1)+' KB)');
+  const lg=SRC.lines.findIndex(l=>l.length>260)+1;lg?add('Warning','Very long line',lg,'Hard to maintain.','Break it up.','Slower reviews.'):ok('No unreadably long lines');
+  const un=[...new Set(ids)].filter(i=>S.split(i).length<3);un.length?add('Warning','Possibly unused id: '+un[0],find(new RegExp('id="'+un[0]+'"')),'Dead markup adds clutter.','Remove if unused.','Minor.'):ok('No unused ids detected');
+  typeof HTMLDialogElement==='function'&&CSS.supports('color','color-mix(in srgb,red,blue)')?ok('Browser features used are supported here'):add('Warning','Newer browser features missing',0,'Dialog or color-mix is unsupported in this browser.','Test on older Safari and Android WebView.','Layout degrades.');
+  /Content-Security-Policy/.test(S)?ok('CSP meta found'):add('Warning','No Content-Security-Policy',find(/<head/),'Nothing limits what scripts may run.','Send a CSP header from the server.','Weaker defence against XSS.');
+  add('Warning','Server settings cannot be checked from here',0,'HTTPS, HSTS, cache and security headers live on the server.','Verify them on the real host.','Unknown until deployed.');
+  add('Warning','No offline or install support',0,'No service worker or manifest is included.','Add only if offline use is a requirement.','Needs a connection.');
+  const rank={Critical:0,Error:1,Warning:2,Passed:3};F.sort((a,b)=>rank[a.lv]-rank[b.lv]);return F;
+}
+let filt='all';
+function showReview(){
+  const F=review(),c={Critical:0,Error:0,Warning:0,Passed:0};F.forEach(f=>c[f.lv]++);
+  $('revMeta').innerHTML='<span>Reviewing version <b class="mono">'+SRC.hash+'</b>, the same snapshot as the viewer</span><span>Run: '+esc(new Date().toLocaleString())+'</span><span>'+esc(SRC.origin)+'</span>';
+  const need=F.filter(f=>f.lv!=='Passed');
+  $('rv').innerHTML='<div class="sum" role="group" aria-label="Filter results"><button data-f="all" aria-pressed="true">All '+F.length+'</button>'+
+   Object.keys(c).map(k=>'<button data-f="'+k+'" aria-pressed="false">'+k+' '+c[k]+'</button>').join('')+'</div><div id="cards"></div>'+
+   '<div class="note2"><b>Production Readiness Summary</b><p>'+(c.Critical+c.Error?'Fix the '+(c.Critical+c.Error)+' critical or error item(s) first.':'No critical or error items were found.')+' '+c.Warning+' warning(s) remain.</p>'+
+   '<ul style="margin:8px 0 0 18px">'+need.map(f=>'<li>'+esc(f.lv+': '+f.p)+'</li>').join('')+'</ul>'+
+   '<p style="margin-top:10px">This is an automated review of the visible code. It finds technical issues but cannot prove the page is secure or safe for production. Before deployment, still do real-device testing, a security review, server and header checks, and a human sign-off.</p></div>';
+  const draw=()=>{$('cards').innerHTML=F.filter(f=>filt==='all'||f.lv===filt).map(f=>'<div class="card"><span class="lv '+f.lv+'">'+f.lv+'</span><b>'+esc(f.p)+'</b><dl><dt>Section</dt><dd>'+f.sec+'</dd><dt>Line</dt><dd>'+(f.line||'Not tied to one line')+'</dd><dt>Why it matters</dt><dd>'+esc(f.why)+'</dd><dt>Suggested fix</dt><dd>'+esc(f.fix)+'</dd><dt>Production impact</dt><dd>'+esc(f.imp)+'</dd></dl></div>').join('')||'<p>Nothing in this category.</p>'};
+  filt='all';draw();
+  $('rv').querySelectorAll('[data-f]').forEach(b=>b.onclick=()=>{filt=b.dataset.f;$('rv').querySelectorAll('[data-f]').forEach(x=>x.setAttribute('aria-pressed',x===b));draw()});
+}
+$('openRev').onclick=async()=>{$('rv').innerHTML='<div class="sk" style="width:100%"></div>';$('revDlg').showModal();await loadSource();showReview()};
+
+/* ===== L. Privacy and Terms (this page keeps nothing and sends nothing) ===== */
+const LEGAL={
+ priv:['Privacy Policy','<p>This page runs entirely in your browser. It does not collect, store, or send personal information. It uses no cookies, accounts, analytics, or outside services.</p><p>The conversation shown is a fictional demonstration. Copying or downloading the source happens on your device only.</p><p>If this page is later connected to a service, this policy must be updated before release.</p>'],
+ tos:['Terms of Service','<p>This page is provided as is, without warranties. The conversation is a creative demonstration and does not describe any real person.</p><p>The Code Review is an automated aid. It does not certify security or readiness, and you remain responsible for testing and approving anything you deploy.</p><p>Credit to Avneet Kumar must stay visible in the footer.</p>']};
+for(const [btn,key] of [['openPriv','priv'],['openTos','tos']])$(btn).onclick=()=>{$('legT').textContent=LEGAL[key][0];$('legBody').innerHTML=LEGAL[key][1];$('legDlg').showModal()};
+
+runChat();startHim();
+</script>
+</body>
+</html>
